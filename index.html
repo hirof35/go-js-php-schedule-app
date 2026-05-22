@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多機能高耐久スケジュールアプリ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+    <style>
+        #calendar { max-width: 1100px; margin: 40px auto; padding: 0 10px; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div class="container mx-auto p-4">
+        <header class="mb-6 text-center">
+            <h1 class="text-2xl font-bold tracking-tight text-slate-900">Distributed Schedule System</h1>
+            <p class="text-sm text-slate-500">Go Engine (:8080) × PHP CQRS Hybrid</p>
+        </header>
+
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <div id="calendar"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var calendarEl = document.getElementById('calendar');
+            
+            const LARAVEL_API = 'http://localhost/php_code/go-js-php-schedule-app/save_event.php';
+            const GO_API      = 'http://localhost:8080/api/v1';
+
+            var calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'timeGridWeek',
+                locale: 'ja',
+                editable: true,
+                selectable: true,
+
+                // 【READルート】表示データはGoサーバーから取得
+                events: function(fetchInfo, successCallback, failureCallback) {
+                    const url = `${GO_API}/events?user_id=1&start=${fetchInfo.startStr}&end=${fetchInfo.endStr}`;
+                    fetch(url)
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log("Goから取得したデータ:", data);
+                            successCallback(data);
+                        })
+                        .catch(error => {
+                            console.error("Goサーバーからのデータ取得エラー:", error);
+                            failureCallback(error);
+                        });
+                },
+
+                // 【WRITEルート】予定追加時の処理
+                select: async function(selectionInfo) {
+                    const title = prompt('新しい予定のタイトルを入力してください:');
+                    if (!title) {
+                        calendar.unselect();
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(LARAVEL_API, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                title: title,
+                                start_at: selectionInfo.startStr,
+                                end_at: selectionInfo.endStr,
+                                all_day: selectionInfo.allDay
+                            })
+                        });
+
+                        if (response.ok) {
+                            const resData = await response.json();
+                            alert(resData.message); // 「永続化しました」のポップアップ
+                            calendar.refetchEvents(); // カレンダー画面を更新
+                        } else {
+                            alert('保存に失敗しました');
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        alert('PHPサーバーへの接続に失敗しました。');
+                    }
+                    calendar.unselect();
+                }, // ← カンマで繋いで次のオプションへ
+
+                // 【DELETEルート】配置された予定をクリックした時の処理
+                eventClick: async function(info) {
+                    if (confirm(`予定「${info.event.title}」を削除しますか？`)) {
+                        try {
+                            const response = await fetch('http://localhost/php_code/go-js-php-schedule-app/delete_event.php', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    id: info.event.id // クリックされたイベントの固有IDを送信
+                                })
+                            });
+
+                            if (response.ok) {
+                                const resData = await response.json();
+                                alert(resData.message);
+                                // カレンダーの描画から対象の予定カードを即座に消去
+                                info.event.remove(); 
+                            } else {
+                                alert('削除に失敗しました。');
+                            }
+                        } catch (error) {
+                            console.error('Error:', error);
+                            alert('削除通信中にエラーが発生しました。');
+                        }
+                    }
+                } // ← オプションの末尾なのでカンマ不要
+            }); // ← ここでCalendarの初期化オプション群を閉じます
+            
+            calendar.render();
+            console.log("FullCalendarが正常に初期化されました。");
+        });
+    </script>
+</body>
+</html>
